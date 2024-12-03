@@ -25,8 +25,8 @@ urlpatterns = [
 
                   path('category/create', views.CategoryCreate.as_view(), name='list-product'),
                   path('category/<int:pk>', views.CategoryRUD.as_view(), name='list-product'),
-                  # order
 
+                  # order
                   path('order', views.OrderDetailView.as_view(), name='list-product'),
                   path('order/user/<int:pk>', views.OrderUserView.as_view(), name='list-product-user'),
                   path('order/<int:pk>', views.OrderDetailRetriandDelete.as_view(), name='list-product'),
@@ -59,7 +59,8 @@ urlpatterns = [
                   path('address', views.AddressList.as_view(), name="address-list-user"),
                   path('address/<int:pk>', views.AddressSingle.as_view(), name="address-single"),
                   path('address/customer/<int:pk>', views.RetrieveCustomAddress.as_view(), name="address-single-user"),
-                  path('address/user/<int:pid>', views.AddressCreate.as_view(), name="address-list-user"),
+                  path('address/user/<int:customerId>', views.AddressCreate.as_view(), name="address-list-user"),
+                  path('address/delete/<int:address_id>', views.delete_address, name='address-single'),
 
                   # Upload image
                   path('image', views.ImageCreate.as_view(), name="img_upload"),

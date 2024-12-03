@@ -5,7 +5,8 @@ import requests
 
 from decimal import Decimal, ROUND_DOWN
 from rest_framework.pagination import PageNumberPagination
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
+
 
 class MyCustomPagination(PageNumberPagination):
     page_size = 9
@@ -1175,106 +1176,133 @@ class OrderDetailCreate(generics.CreateAPIView):
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if serializer.is_valid():
 
-        print(self.request.data)
-        data = self.request.data
-        add = get_object_or_404(Address, pk=self.kwargs['pk'])
+            try:
+                with transaction.atomic():
+                    print(self.request.data)
+                    data = self.request.data
 
-        total = Decimal('0')  # Initialize as a Decimal
+                    add = get_object_or_404(Address, pk=self.kwargs['pk'])
 
-        order = OrderDetail.objects.create(
-            customer=serializer.validated_data['customer'],
-            amount=total,
-            address=add,
-            method=serializer.validated_data['method']
-        )
+                    # Create the order
+                    total = Decimal('0')  # Initialize as a Decimal
 
-        # Process each product
-        product_lines = []
-        pro = []
+                    order = OrderDetail.objects.create(
+                        customer=serializer.validated_data['customer'],
+                        amount=total,
+                        address=add,
+                        method=serializer.validated_data['method']
+                    )
 
-        for product_data in data['products']:
-            print("Loop")
-            product = get_object_or_404(Product, id=product_data['id'])
-            color = get_object_or_404(Colors, id=product_data['colorselection'])
-            quantity = product_data['quantity']
-            size = get_object_or_404(Sizes, id=product_data['size'])
+                    # Process each product
+                    product_lines = []
+                    pro = []
 
-            # Check if enough stock is available
-            if product.stockqty < quantity:
-                return Response({"error": f"Not enough stock available for product {product.id}"}, status=status.HTTP_400_BAD_REQUEST)
+                    for product_data in data['products']:
 
-            # Update color stock
-            if color.stockqty >= quantity:
-                color.stockqty -= quantity
-            else:
-                return Response({"error": f"Not enough stock available for color {color.id}"}, status=status.HTTP_400_BAD_REQUEST)
+                        product = Product.objects.get(id=product_data['id'])
 
-            product_lines.append(f"{product.productname} {quantity} {product.price}")
-            print(color.imgid.images)
-            pro.append({
-                "name": product.productname,
-                "price": (color.price - (color.price * (product.discount / 100))),
-                "quantity": quantity,
-                "color": color.color,
-                "size": size.size,
-                "imageurl": color.imgid.images.url,
-                "discount": product.discount
-            })
+                        color = Colors.objects.get(id=product_data['colorselection'])
+                        if color.stockqty > 0:
+                            color.stockqty = color.stockqty - product_data['quantity']
 
-            # Create the OrderProduct
-            OrderProduct.objects.create(
-                order=order,
-                product=product,
-                quantity=quantity,
-                colorselection=color,
-                size=size
-            )
+                        quantity = product_data['quantity']
+                        size = Sizes.objects.get(id=product_data['size'])
 
-            discount_decimal = Decimal(product.discount) / Decimal('100')
-            color_price = Decimal(color.price)
-            calculated_price = color_price - (color_price * discount_decimal)
-            line_total = Decimal(quantity) * calculated_price
-            total += line_total
+                        product_lines.append(f"{product.productname} {quantity} {product.price}")
+                        print(color.imgid.images)
 
-            # Update the stock quantity of the product
-            product.stockqty -= quantity
-            product.sell_rating += 1
-            product.save()
-            color.save()
+                        pro.append({
+                            "name": product.productname,
+                            "price": (color.price - (color.price * (product.discount / 100))),
+                            "quantity": quantity,
+                            "color": color.color,
+                            "size": size.size,
+                            "imageurl": color.imgid.images.url,
+                            "discount": product.discount
+                        })
 
-        print(total)
-        order.amount = total.quantize(Decimal('.01'), rounding=ROUND_DOWN)  # Round down to 2 decimal places
-        print(order.amount)
+                        # Check if enough stock is available
+                        if product.stockqty < quantity:
+                            return Response({"error": f"Not enough stock available for product {product.id}"})
 
-        order.ispaid = order.method.lower() == "online"
-        order.save()
+                        # Create the OrderProduct
+                        OrderProduct.objects.create(
+                            order=order,
+                            product=product,
+                            quantity=quantity,
+                            colorselection=color,
+                            size=size
 
-        # Email sending logic (commented out for now)
-        # context = {
-        #     "order": order,
-        #     "products": pro,
-        #     "total": str(round(total, 2)),
-        #     "url": "https://yourwebsite.com"
-        # }
-        # html_message = render_to_string("Order.html", context)
-        # plain_msg = strip_tags(html_message)
-        # message = EmailMultiAlternatives(
-        #     subject='Order Confirm',
-        #     from_email="your_email@example.com",
-        #     to=[order.customer.email],
-        #     body=plain_msg,
-        # )
-        # message.attach_alternative(html_message, "text/html")
-        # message.send()
+                        )
 
-        return Response({
-            "data": serializer.data,
-            "id": order.id  # Access the id of the created object
-        }, status=status.HTTP_201_CREATED)
+                        discount_decimal = Decimal(product.discount) / Decimal('100')
+                        color_price = Decimal(color.price)
+                        calculated_price = color_price - (color_price * discount_decimal)
+                        line_total = Decimal(quantity) * calculated_price
+                        total += line_total
 
+                        # Update the stock quantity of the product
+                        product.stockqty -= quantity
+                        # Increase product selling
+                        product.sell_rating += 1
+                        product.save()
+                        color.save()
+
+                    print(total)
+                    order.amount = total.quantize(Decimal('.01'), rounding=ROUND_DOWN)  # Round down to 2 decimal places
+
+                    print(order.amount)
+
+                    if order.method.lower() == "online":
+                        order.ispaid = True
+                    else:
+                        order.ispaid = False
+                    order.save()
+                    order_products = "\n".join(product_lines)
+
+                    date_string = str(order.shipped_at)
+
+                    # create a datetime object from the string
+                    date_object = datetime.strptime(date_string, '%Y-%m-%d %H:%M:%S.%f%z')
+
+                    # convert the datetime object to a string in the desired format
+                    formatted_date_string = date_object.strftime('%d-%m-%Y')
+                    subject = 'Order Comfirm'
+                    rounded_and_truncated_number = str(round(total, 2))[:5]
+
+                    var = order.amount
+                    var = order.ispaid
+
+                    # context = {
+                    #     "order": order,
+                    #     "products": pro,
+                    #     "total": rounded_and_truncated_number,
+                    #     "url": "https://django-ecomm-6e6490200ee9.herokuapp.com"
+                    #
+                    # }
+                    # html_message = render_to_string("Order.html", context)
+                    # plain_msg = strip_tags(html_message)
+                    #
+                    # message = EmailMultiAlternatives(
+                    #     subject=subject,
+                    #     from_email="Nightpp19@gmail.com",
+                    #     to=[order.customer.email],
+                    #     body=plain_msg,
+                    #
+                    # )
+                    #
+                    # message.attach_alternative(html_message, "text/html")
+                    # message.send()
+                    print("order success 200")
+                    return Response({
+                        "data": serializer.data,
+                        "id": order.id  # Access the id of the created object
+                    }, status=status.HTTP_201_CREATED)
+            except Exception as e:
+                print(f"An error occurred: {str(e)}")
+                return Response({"error": "An unexpected error occurred. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class OrderDetailRetriandDelete(generics.GenericAPIView):
     def get(self, request, pk):
@@ -1299,32 +1327,38 @@ class OrderDetailRetriandDelete(generics.GenericAPIView):
 
 @api_view(['PUT', 'DELETE'])
 def OrderStatus(request, pk):
+    # Fetch the order instance based on the provided pk
+    order = get_object_or_404(OrderDetail, pk=pk)
+
     if request.method == 'PUT':
+        # Create a serializer instance with the order instance and the incoming data
+        serializer = OrderDetailStatusSerializer(order, data=request.data, partial=True)
 
-        if pk is not None:
-            serializers = OrderDetailStatusSerializer(data=request.data)
-            order = get_object_or_404(OrderDetail, pk=pk)
-        if serializers.is_valid():
+        if serializer.is_valid():
+            # Save the updated order instance
+            order = serializer.save()
 
-            order.status = serializers.validated_data['status']
+            # Handle the status update logic
+            if order.status == 'Delivered':
+                order.delivered = True  # Set delivered to True
+                order.ispaid = True  # Assuming you want to mark it as paid when delivered
+            elif order.status == 'Completed':
+                order.delivered = True  # You can keep it as True since it was delivered
+                order.ispaid = True  # Assuming it should be paid when completed
+            else:  # This covers the 'Pending' status
+                order.delivered = False  # Reset delivered to False
+                order.ispaid = False  # Reset ispaid to False for pending status
 
-            if (order.method == "card"):
-                pass
-            else:
-                if (serializers.validated_data['status'] == 'Delivered'):
-                    order.ispaid = True
-                else:
-                    order.ispaid = False
-            order.save()
-            return Response(serializers.data, status=HTTP_200_OK)
+            order.save()  # Save the order again if delivered or ispaid has changed
+
+            # Return the serialized data of the updated order
+            return Response(serializer.data, status=status.HTTP_200_OK)
         else:
-            return Response(serializers.errors, status=HTTP_400_BAD_REQUEST)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
-    else:
-        return Response({
-            "error": "please provide your parameter value"
-        }, status=HTTP_400_BAD_REQUEST)
+    return Response({
+        "error": "Invalid request method. Use PUT to update."
+    }, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['GET'])
@@ -1414,29 +1448,24 @@ class AddressSingle(generics.RetrieveUpdateDestroyAPIView):
         return Response({"status": "success", "code": status.HTTP_200_OK,
                          "message": "Address has deleted successfully"}, status=status.HTTP_200_OK)
 
-    # class AddressUser(generics.RetrieveUpdateAPIView):
-    #    queryset= Address.objects.all()
-    #    serializer_class = AddressSerializer
-    #    # def get(self, request, *args, **kwargs):
-
-    #    #     pk = self.kwargs.get('pk',None)
-    #    #     print(pk)
-    #    #     if pk is not None:
-    #    #       pk =  self.kwargs.get('pid',None)
-    #    #       customer =Customer.objects.get(pk=pk)
-    #    #       print(customer)
-
-    #    #       return Address.objects.get(customer_id  =customer)
-    #    #     else:
-    #    #        return Response({
-    #    #           'response':'no detail'
-    #    #        })
-
     def get(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
 
+@api_view(['DELETE'])
+def delete_address(request, address_id):
+    # Retrieve the address based on customer_id and address_id
+    address = get_object_or_404(Address, id=address_id)
+
+    # Delete the address
+    address.delete()
+
+    # Return a success response
+    return Response({
+        "status": "success",
+        "data": "Address Deleted"
+    }, status=status.HTTP_204_NO_CONTENT)
 
 class ReviewList(generics.ListCreateAPIView):
     queryset = ReviewRating.objects.all()
@@ -1546,9 +1575,8 @@ class AddressCreate(generics.CreateAPIView):
 
     def perform_create(self, serializer):
         # Perform additional actions before saving
-        pk = self.kwargs.get('pid', None)
-        customer = get_object_or_404(Customer, pk=pk)
-        print(pk)
+        customer_id = self.kwargs.get('customerId')
+        customer = get_object_or_404(Customer, pk=customer_id)
         serializer.save(customer_id=customer)
 
 

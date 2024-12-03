@@ -82,8 +82,12 @@ class MessageSerializer(serializers.ModelSerializer):
     model = Message
     fields ='__all__'
 class ProductSerializer(serializers.ModelSerializer):
-    attribution = AttributesSerialzer(many=False)
-    imgid = ImageSerializer(many=True)
+    attribution = serializers.PrimaryKeyRelatedField(many=False, queryset=Attributes.objects.all())
+    imgid = serializers.PrimaryKeyRelatedField(many=True, queryset=Images.objects.all())
+    colorid = serializers.PrimaryKeyRelatedField(many=True, queryset=Colors.objects.all(), source='attribution.colorid')
+    size = serializers.PrimaryKeyRelatedField(many=True, queryset=Sizes.objects.all(), source='attribution.size')
+    # attribution = AttributesSerialzer(many=False)
+    # imgid = ImageSerializer(many=True)
     class Meta:
       model = Product
       fields ='__all__'
