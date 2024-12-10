@@ -1008,7 +1008,7 @@ class ProductRUD(generics.RetrieveUpdateDestroyAPIView):
 
 class ProductCreate(generics.CreateAPIView):
     serializer_class = ProductSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    # permission_classes = [IsAuthenticatedOrReadOnly]
 
 
 class ProductFavorite(generics.ListCreateAPIView):
@@ -2203,27 +2203,27 @@ def register(request):
             customer = serializers.save()
 
             # Generate confirmation token
-            confirmation_token = default_token_generator.make_token(customer)
-            activate_link_url = reverse('activate')
-            activation_link = f'{activate_link_url}?user_id={customer.id}&confirmation_token={confirmation_token}'
+            # confirmation_token = default_token_generator.make_token(customer)
+            # activate_link_url = reverse('activate')
+            # activation_link = f'{activate_link_url}?user_id={customer.id}&confirmation_token={confirmation_token}'
 
             # Prepare email
-            host = f"http://{request.get_host()}"
-            subject = 'Activate your account'
-            html_message = render_to_string("Comfirm.html", {
-                "host": host,
-                "activate_link": activation_link
-            })
-            plain_msg = strip_tags(html_message)
+            # host = f"http://{request.get_host()}"
+            # subject = 'Activate your account'
+            # html_message = render_to_string("Comfirm.html", {
+            #     "host": host,
+            #     "activate_link": activation_link
+            # })
+            # plain_msg = strip_tags(html_message)
 
             try:
                 # Send email
                 send_mail(
-                    subject=subject,
-                    message=plain_msg,
+                    # subject=subject,
+                    # message=plain_msg,
                     from_email=settings.DEFAULT_FROM_EMAIL,
                     recipient_list=[customer.email],
-                    html_message=html_message,
+                    # html_message=html_message,
                     fail_silently=False,
                 )
                 return Response({
@@ -2247,24 +2247,22 @@ def register(request):
     return Response(serializers.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['GET'])
-def activate(request):
-    user_id = request.GET.get('user_id')
-    token = request.GET.get('confirmation_token')
+@api_view(['POST'])
+def activate(request, user_id):
 
     try:
         user = Customer.objects.get(pk=user_id)
 
-        if not default_token_generator.check_token(user, token):
-            return Response({"error": "Invalid token"}, status=400)
-
         if user.is_activated:
             return Response({"error": "User is already active"}, status=400)
+
         user.is_activated = True
         user.is_active = True
         user.save()
 
         return Response({"message": "User activated successfully"}, status=200)
 
-    except (TypeError, ValueError, OverflowError, Customer.DoesNotExist):
-        return Response({"error": "Invalid link"}, status=400)
+    except Customer.DoesNotExist:
+        return Response({"error": "Invalid user"}, status=400)
+    except (TypeError, ValueError, OverflowError):
+        return Response({"error": "Invalid activation link"}, status=400)

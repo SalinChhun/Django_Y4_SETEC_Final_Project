@@ -53,7 +53,7 @@ urlpatterns = [
                   path('auth/reset/verify', views.VerifyCodePW, name="reset-password2"),
                   path('auth/reset/password', views.ResetVerify, name="reset-password3"),
                   path('auth/user/<int:pk>', views.finduser, name="user"),
-                  path('activate/', views.activate, name='activate'),
+                  path('activate/<int:user_id>', views.activate, name='activate'),
 
                   # Address user
                   path('address', views.AddressList.as_view(), name="address-list-user"),

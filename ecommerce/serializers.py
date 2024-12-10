@@ -82,16 +82,23 @@ class MessageSerializer(serializers.ModelSerializer):
     model = Message
     fields ='__all__'
 class ProductSerializer(serializers.ModelSerializer):
-    attribution = serializers.PrimaryKeyRelatedField(many=False, queryset=Attributes.objects.all())
-    imgid = serializers.PrimaryKeyRelatedField(many=True, queryset=Images.objects.all())
-    colorid = serializers.PrimaryKeyRelatedField(many=True, queryset=Colors.objects.all(), source='attribution.colorid')
-    size = serializers.PrimaryKeyRelatedField(many=True, queryset=Sizes.objects.all(), source='attribution.size')
-    # attribution = AttributesSerialzer(many=False)
-    # imgid = ImageSerializer(many=True)
-    class Meta:
-      model = Product
-      fields ='__all__'
 
+    imgid = serializers.PrimaryKeyRelatedField(many=True, queryset=Images.objects.all())
+
+    class Meta:
+        model = Product
+        fields = '__all__'
+
+    def create(self, validated_data):
+        # Extract related fields
+        imgid = validated_data.pop('imgid', [])
+
+        # Create the product
+        product = Product.objects.create(**validated_data)
+
+        product.imgid.set(imgid)
+
+        return product
 
 class CategorySerializer(serializers.ModelSerializer):
   
